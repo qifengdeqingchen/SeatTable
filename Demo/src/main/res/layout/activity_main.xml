@@ -10,6 +10,7 @@
 
     <com.qfdqc.views.seattable.SeatTable
         android:id="@+id/seatView"
+        android:background="#ffffff"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content" />
 
