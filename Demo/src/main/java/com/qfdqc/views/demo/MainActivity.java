@@ -2,8 +2,12 @@ package com.qfdqc.views.demo;
 
 import android.os.Bundle;
 import android.support.v7.app.AppCompatActivity;
+import android.util.Log;
+import android.view.View;
 
 import com.qfdqc.views.seattable.SeatTable;
+
+import java.util.ArrayList;
 
 public class MainActivity extends AppCompatActivity {
     public SeatTable seatTableView;
@@ -49,6 +53,6 @@ public class MainActivity extends AppCompatActivity {
 
         seatTableView.getSelectedSeats();
 
-        seatTableView.setData(10,15);
+        seatTableView.setData(20,15);
     }
 }

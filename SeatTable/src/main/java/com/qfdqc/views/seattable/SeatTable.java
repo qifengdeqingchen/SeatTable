@@ -1,5 +1,8 @@
 package com.qfdqc.views.seattable;
 
+import android.animation.Animator;
+import android.animation.TypeEvaluator;
+import android.animation.ValueAnimator;
 import android.content.Context;
 import android.content.res.TypedArray;
 import android.graphics.Bitmap;
@@ -9,24 +12,36 @@ import android.graphics.Color;
 import android.graphics.Matrix;
 import android.graphics.Paint;
 import android.graphics.Path;
+import android.graphics.Point;
+import android.graphics.PointF;
 import android.graphics.RectF;
 import android.os.Handler;
 import android.os.Message;
 import android.util.AttributeSet;
+import android.util.Log;
 import android.view.GestureDetector;
 import android.view.MotionEvent;
 import android.view.ScaleGestureDetector;
 import android.view.View;
+import android.view.animation.DecelerateInterpolator;
 import android.widget.Toast;
 
 import java.util.ArrayList;
+import java.util.Collections;
 
 /**
  * Created by baoyunlong on 16/6/16.
  */
 public class SeatTable extends View {
+    private final boolean DBG = true;
+
     Paint paint = new Paint();
+    Paint lineNumberPaint;
+    float lineNumberTxtHeight;
+    ArrayList<String> lineNumbers=new ArrayList<>();
+    Paint.FontMetrics lineNumberPaintFontMetrics;
     Matrix matrix = new Matrix();
+    AnimationScaleRunnable animationScaleRunnable=new AnimationScaleRunnable();
 
     /**
      * 座位水平间距
@@ -69,11 +84,6 @@ public class SeatTable extends View {
     Bitmap seatSoldBitmap;
 
     Bitmap overviewBitmap;
-
-    /**
-     * 整个座位图
-     */
-    Bitmap seat;
 
     int lastX;
     int lastY;
@@ -145,9 +155,9 @@ public class SeatTable extends View {
     boolean firstScale = true;
 
     /**
-     * 做多可以选择的座位数量
+     * 最多可以选择的座位数量
      */
-    int maxSelected=Integer.MAX_VALUE;
+    int maxSelected = Integer.MAX_VALUE;
 
     private SeatChecker seatChecker;
 
@@ -184,13 +194,11 @@ public class SeatTable extends View {
      */
     boolean isDrawOverviewBitmap = true;
 
-
     int overview_checked;
     int overview_sold;
     int seatCheckedResID;
     int seatSoldResID;
     int seatAvailableResID;
-
 
     boolean isOnClick;
 
@@ -198,7 +206,6 @@ public class SeatTable extends View {
     private static final int SEAT_TYPE_SELECTED = 2;
     private static final int SEAT_TYPE_AVAILABLE = 3;
     private static final int SEAT_TYPE_NOT_AVAILABLE = 4;
-    Canvas seatCanvas;
 
     private int downX, downY;
     private boolean pointer;
@@ -212,7 +219,7 @@ public class SeatTable extends View {
     RectF rectF;
 
     /**
-     * 头部下面横向的高度
+     * 头部下面横线的高度
      */
     int borderHeight = 1;
     Paint redBorderPaint;
@@ -259,10 +266,6 @@ public class SeatTable extends View {
         screenHeight = dip2Px(20);
         headHeight = dip2Px(30);
         if (seatBitmapWidth > 0 && seatBitmapHeight > 0) {
-            seat = Bitmap.createBitmap(seatBitmapWidth, seatBitmapHeight, Bitmap.Config.RGB_565);
-
-            seatCanvas = new Canvas(seat);
-            seatCanvas.drawColor(Color.WHITE);
         }
         headPaint = new Paint();
         headPaint.setStyle(Paint.Style.FILL);
@@ -290,23 +293,37 @@ public class SeatTable extends View {
         rectW = column * rectWidth + (column - 1) * overviewSpacing + overviewSpacing * 2;
         rectH = row * rectHeight + (row - 1) * overviewVerSpacing + overviewVerSpacing * 2;
         overviewBitmap = Bitmap.createBitmap((int) rectW, (int) rectH, Bitmap.Config.ARGB_4444);
+
+        lineNumberPaint=new Paint(Paint.ANTI_ALIAS_FLAG);
+        lineNumberPaint.setColor(bacColor);
+        lineNumberPaint.setTextSize(getResources().getDisplayMetrics().density * 16);
+        lineNumberTxtHeight=lineNumberPaint.measureText("4");
+        lineNumberPaintFontMetrics=lineNumberPaint.getFontMetrics();
+        lineNumberPaint.setTextAlign(Paint.Align.CENTER);
+
+        for(int i=0;i<row;i++){
+            lineNumbers.add((i+1)+"");
+        }
+
     }
 
     @Override
     protected void onDraw(Canvas canvas) {
+        long startTime=System.currentTimeMillis();
         if (row <= 0 || column == 0) {
             return;
         }
-        if (isNeedDrawSeatBitmap) {
-            drawSeat();
-        }
-
-        if (isFirstDraw) {
-            isFirstDraw = false;
-            matrix.postTranslate(getWidth() / 2 - seatBitmapWidth / 2, headHeight + screenHeight + borderHeight + verSpacing);
-        }
-
-        canvas.drawBitmap(seat, matrix, paint);
+//        if (isNeedDrawSeatBitmap) {
+//            drawSeat();
+//        }
+//
+//        if (isFirstDraw) {
+//            isFirstDraw = false;
+//            matrix.postTranslate(getWidth() / 2 - seatBitmapWidth / 2, headHeight + screenHeight + borderHeight + verSpacing);
+//        }
+//
+//        canvas.drawBitmap(seat, matrix, paint);
+        drawSeat(canvas);
         drawNumber(canvas);
 
         if (headBitmap == null) {
@@ -317,11 +334,18 @@ public class SeatTable extends View {
         drawScreen(canvas);
 
         if (isDrawOverview) {
+            long s=System.currentTimeMillis();
             if (isDrawOverviewBitmap) {
                 drawOverview();
             }
             canvas.drawBitmap(overviewBitmap, 0, 0, null);
             drawOverview(canvas);
+            Log.d("drawTime","OverviewDrawTime:"+(System.currentTimeMillis()-s));
+        }
+
+        if(DBG){
+            long drawTime=System.currentTimeMillis()-startTime;
+            Log.d("drawTime","totalDrawTime:"+drawTime);
         }
     }
 
@@ -453,84 +477,110 @@ public class SeatTable extends View {
         canvas.drawText(screenName, centerX - pathPaint.measureText(screenName) / 2, getBaseLine(pathPaint, startY, startY + screenHeight * getMatrixScaleY()), pathPaint);
     }
 
-    void drawSeat() {
+    Matrix tempMatrix=new Matrix();
+    void drawSeat(Canvas canvas) {
+        zoom=getMatrixScaleX();
+        long startTime = System.currentTimeMillis();
+        Log.d("zoomTest","drawZoom"+zoom);
+        float translateX=getTranslateX();
+        float translateY=getTranslateY();
+        float scaleX=zoom;
+        float scaleY=zoom;
 
         for (int i = 0; i < row; i++) {
+            float top =  i * seatBitmap.getHeight()*scaleY + i * verSpacing*scaleY+translateY;
+
+            float bottom=  top+seatBitmap.getHeight()*scaleY;
+            if(bottom<0||top>getHeight()){
+                continue;
+            }
             for (int j = 0; j < column; j++) {
+                float left =  j * seatBitmap.getWidth()*scaleX + j * spacing*scaleX+translateX;
 
-                int left = j * seatBitmap.getWidth() + j * spacing;
-                int top = i * seatBitmap.getHeight() + i * verSpacing;
+                float right=  (left+seatBitmap.getHeight()*scaleY);
+                if(right<0||left>getWidth()){
+                    continue;
+                }
 
-                int seatType = getSeatType(i, j);
+                int seatType = getSeatType(i,j);
+                tempMatrix.setTranslate(left,top);
+                tempMatrix.postScale(scaleX,scaleY,left,top);
+
                 switch (seatType) {
                     case SEAT_TYPE_AVAILABLE:
-                        seatCanvas.drawBitmap(seatBitmap, left, top, paint);
+                        canvas.drawBitmap(seatBitmap,tempMatrix, paint);
                         break;
                     case SEAT_TYPE_NOT_AVAILABLE:
-
                         break;
                     case SEAT_TYPE_SELECTED:
-                        seatCanvas.drawBitmap(checkedSeatBitmap, left, top, paint);
-
+                        canvas.drawBitmap(checkedSeatBitmap,tempMatrix, paint);
                         break;
                     case SEAT_TYPE_SOLD:
-                        seatCanvas.drawBitmap(seatSoldBitmap, left, top, paint);
+                        canvas.drawBitmap(seatSoldBitmap, tempMatrix, paint);
                         break;
                 }
 
             }
         }
-        isNeedDrawSeatBitmap = false;
 
+        if (DBG) {
+            long drawTime = System.currentTimeMillis() - startTime;
+            Log.d("drawTime", "seatDrawTime:" + drawTime);
+        }
     }
 
     private int getSeatType(int row, int column) {
-        String seat = row + "," + column;
-        int seatType = SEAT_TYPE_AVAILABLE;
+
+        if (isHave(getID(row,column))>=0) {
+            return SEAT_TYPE_SELECTED;
+        }
+
         if (seatChecker != null) {
             if (!seatChecker.isValidSeat(row, column)) {
-                seatType = SEAT_TYPE_NOT_AVAILABLE;
+                return SEAT_TYPE_NOT_AVAILABLE;
             } else if (seatChecker.isSold(row, column)) {
-                seatType = SEAT_TYPE_SOLD;
+                return SEAT_TYPE_SOLD;
             }
         }
 
-        if (isHave(seat)) {
-            seatType = SEAT_TYPE_SELECTED;
-        }
-        return seatType;
+        return SEAT_TYPE_AVAILABLE;
     }
+
+    private int getID(int row, int column){
+        return row*this.column+(column+1);
+    }
+
+    int bacColor=Color.parseColor("#7e000000");
 
     /**
      * 绘制行号
      */
     void drawNumber(Canvas canvas) {
-
-        paint.setColor(Color.parseColor("#7e000000"));
-        paint.setTextSize(getResources().getDisplayMetrics().density * 16);
-        paint.setAntiAlias(true);
+        long startTime=System.currentTimeMillis();
+        lineNumberPaint.setColor(bacColor);
         int translateY = (int) getTranslateY();
         float scaleY = getMatrixScaleY();
 
-        rectF.top = translateY - paint.measureText("4") / 2;
-        rectF.bottom = translateY + (seatBitmapHeight * scaleY) + paint.measureText("4") / 2;
+        rectF.top = translateY - lineNumberTxtHeight / 2;
+        rectF.bottom = translateY + (seatBitmapHeight * scaleY) + lineNumberTxtHeight / 2;
         rectF.left = 0;
         rectF.right = numberWidth;
-        canvas.drawRoundRect(rectF, numberWidth / 2, numberWidth / 2, paint);
+        canvas.drawRoundRect(rectF, numberWidth / 2, numberWidth / 2, lineNumberPaint);
 
-        Paint.FontMetrics fontMetrics = paint.getFontMetrics();
-
-        paint.setColor(Color.WHITE);
-
-        paint.setTextAlign(Paint.Align.CENTER);
+        lineNumberPaint.setColor(Color.WHITE);
 
         for (int i = 0; i < row; i++) {
 
-            int top = (int) ((i * seatBitmap.getHeight() + i * verSpacing) * scaleY) + translateY;
-            int bottom = (int) ((i * seatBitmap.getHeight() + i * verSpacing + seatBitmap.getHeight()) * scaleY) + translateY;
-            int baseline = (int) ((bottom + top - fontMetrics.bottom - fontMetrics.top) / 2);
+            float top =  (i * seatBitmap.getHeight() + i * verSpacing) * scaleY+ translateY;
+            float bottom = (i * seatBitmap.getHeight() + i * verSpacing + seatBitmap.getHeight()) * scaleY + translateY;
+            float baseline = (bottom + top - lineNumberPaintFontMetrics.bottom - lineNumberPaintFontMetrics.top) / 2;
 
-            canvas.drawText((i + 1) + "", numberWidth / 2, baseline, paint);
+            canvas.drawText(lineNumbers.get(i), numberWidth / 2, baseline, lineNumberPaint);
+        }
+
+        if(DBG){
+            long drawTime=System.currentTimeMillis()-startTime;
+            Log.d("drawTime","drawNumberTime:"+drawTime);
         }
     }
 
@@ -555,7 +605,7 @@ public class SeatTable extends View {
         }
         int right = (int) (rectW - currentWidth / overviewScale / getMatrixScaleX());
 
-        float top = -getTranslateY()+headHeight;
+        float top = -getTranslateY() + headHeight;
         if (top < 0) {
             top = 0;
         }
@@ -688,12 +738,23 @@ public class SeatTable extends View {
             }
         }
 
-        Message message = Message.obtain();
-        MoveInfo moveInfo = new MoveInfo();
-        moveInfo.moveXLength = moveXLength;
-        moveInfo.moveYLength = moveYLength;
-        message.obj = moveInfo;
-        handler.sendMessageDelayed(message, time);
+//        Message message = Message.obtain();
+//        MoveInfo moveInfo = new MoveInfo();
+//        moveInfo.moveXLength = moveXLength;
+//        moveInfo.moveYLength = moveYLength;
+//        message.obj = moveInfo;
+//        handler.sendMessageDelayed(message, time);
+
+        Point start=new Point();
+        start.x= (int) getTranslateX();
+        start.y= (int) getTranslateY();
+
+        Point end=new Point();
+        end.x= (int) (start.x+moveXLength);
+        end.y= (int) (start.y+moveYLength);
+
+        moveAnimate(start,end);
+
     }
 
     class MoveInfo {
@@ -704,14 +765,14 @@ public class SeatTable extends View {
     private void autoScale() {
 
         if (getMatrixScaleX() > 2.2) {
-            postDelayed(new AnimationScaleRunnable(scaleX, scaleY, 2.0f), SCALE_TIME);
+            zoomAnimate(getMatrixScaleX(),2.0f);
         } else if (getMatrixScaleX() < 0.98) {
-            postDelayed(new AnimationScaleRunnable(scaleX, scaleY, 1.0f), SCALE_TIME);
+            zoomAnimate(getMatrixScaleX(),1.0f);
         }
     }
 
     int FRAME_COUNT = 10;
-    int time = 15;
+    int time = 10;
     int count;
     int SCALE_TIME = 15;
 
@@ -732,6 +793,9 @@ public class SeatTable extends View {
                 Message message = Message.obtain();
                 message.obj = msg.obj;
                 handler.sendMessageDelayed(message, time);
+                if(DBG) {
+                    Log.d("autoScroll","moveCount:"+count);
+                }
             } else {
                 count = 0;
             }
@@ -741,30 +805,18 @@ public class SeatTable extends View {
     });
 
 
-    ArrayList<String> selects = new ArrayList<>();
+    ArrayList<Integer> selects = new ArrayList<>();
 
-    public ArrayList<String> getSelectedSeats() {
+    public ArrayList<Integer> getSelectedSeats() {
         return selects;
     }
 
-    private boolean isHave(String seat) {
-        for (String item : selects) {
-            if (seat.equals(item)) {
-                return true;
-            }
-        }
-        return false;
+    private int isHave(Integer seat) {
+        return Collections.binarySearch(selects,seat);
     }
 
-    private void remove(String seat) {
-
-        for (int i = 0; i < selects.size(); i++) {
-            String item = selects.get(i);
-            if (seat.equals(item)) {
-                selects.remove(i);
-                break;
-            }
-        }
+    private void remove(int index) {
+        selects.remove(index);
     }
 
     float[] m = new float[9];
@@ -786,7 +838,7 @@ public class SeatTable extends View {
 
     private float getMatrixScaleX() {
         matrix.getValues(m);
-        return m[0];
+        return m[Matrix.MSCALE_X];
     }
 
     private float dip2Px(float value) {
@@ -805,8 +857,24 @@ public class SeatTable extends View {
         private float targetScale;
 
         private float tempScale;
+        public AnimationScaleRunnable(){
+
+        }
 
         public AnimationScaleRunnable(float x, float y, float targetScale) {
+            float currentScale = getMatrixScaleX();
+            this.x = x;
+            this.y = y;
+            this.targetScale = targetScale;
+
+            if (currentScale < targetScale) {
+                tempScale = 1.06f;
+            } else {
+                tempScale = 0.95f;
+            }
+        }
+
+        public void setPar(float x, float y, float targetScale){
             float currentScale = getMatrixScaleX();
             this.x = x;
             this.y = y;
@@ -826,12 +894,99 @@ public class SeatTable extends View {
             float currentScale = getMatrixScaleX();
 
             if (tempScale > 1 && currentScale < targetScale) {
-
                 postDelayed(this, SCALE_TIME);
             } else if (tempScale < 1 && currentScale > targetScale) {
                 postDelayed(this, SCALE_TIME);
             }
+
         }
+    }
+
+    private void moveAnimate(Point start,Point end){
+        ValueAnimator valueAnimator=ValueAnimator.ofObject(new MoveEvaluator(),start,end);
+        valueAnimator.setInterpolator(new DecelerateInterpolator());
+        MoveAnimation moveAnimation = new MoveAnimation();
+        valueAnimator.addUpdateListener(moveAnimation);
+        valueAnimator.setDuration(400);
+        valueAnimator.start();
+    }
+
+    private void zoomAnimate(float cur,float tar){
+        ValueAnimator valueAnimator=ValueAnimator.ofFloat(cur,tar);
+        valueAnimator.setInterpolator(new DecelerateInterpolator());
+        ZoomAnimation zoomAnim = new ZoomAnimation();
+        valueAnimator.addUpdateListener(zoomAnim);
+        valueAnimator.addListener(zoomAnim);
+        valueAnimator.setDuration(400);
+        valueAnimator.start();
+    }
+
+    private float zoom;
+    private void zoom(float zoom){
+        float z=zoom/getMatrixScaleX();
+        matrix.postScale(z,z,scaleX,scaleY);
+        invalidate();
+    }
+
+    private void move(Point p){
+        float x=p.x-getTranslateX();
+        float y=p.y-getTranslateY();
+        matrix.postTranslate(x,y);
+        Log.d("moveTest","x:"+x+"y:"+y+"rowx:"+p.x+"rowy:"+p.y);
+
+        invalidate();
+    }
+
+    class MoveAnimation implements ValueAnimator.AnimatorUpdateListener{
+
+        @Override
+        public void onAnimationUpdate(ValueAnimator animation) {
+            Point p=(Point)animation.getAnimatedValue();
+
+            move(p);
+        }
+    }
+
+    class MoveEvaluator implements TypeEvaluator{
+
+        @Override
+        public Object evaluate(float fraction, Object startValue, Object endValue) {
+            Point startPoint = (Point) startValue;
+            Point endPoint = (Point) endValue;
+            int x = (int) (startPoint.x + fraction * (endPoint.x - startPoint.x));
+            int y = (int) (startPoint.y + fraction * (endPoint.y - startPoint.y));
+            return new Point(x, y);
+        }
+    }
+
+    class ZoomAnimation implements ValueAnimator.AnimatorUpdateListener, Animator.AnimatorListener {
+
+        @Override
+        public void onAnimationUpdate(ValueAnimator animation) {
+            zoom = (Float) animation.getAnimatedValue();
+
+            zoom(zoom);
+            if(DBG){
+                Log.d("zoomTest","zoom:"+zoom);
+            }
+        }
+
+        @Override
+        public void onAnimationCancel(Animator animation) {
+        }
+
+        @Override
+        public void onAnimationEnd(Animator animation) {
+        }
+
+        @Override
+        public void onAnimationRepeat(Animator animation) {
+        }
+
+        @Override
+        public void onAnimationStart(Animator animation) {
+        }
+
     }
 
     public void setData(int row, int column) {
@@ -893,18 +1048,19 @@ public class SeatTable extends View {
 
                     if (seatChecker != null && seatChecker.isValidSeat(i, j) && !seatChecker.isSold(i, j)) {
                         if (x >= tempX && x <= maxTemX && y >= tempY && y <= maxTempY) {
-                            String seat = i + "," + j;
-                            if (isHave(seat)) {
-                                remove(seat);
+                            int id = getID(i,j);
+                            int index=isHave(id);
+                            if (index>=0) {
+                                remove(index);
                                 if (seatChecker != null) {
                                     seatChecker.unCheck(i, j);
                                 }
                             } else {
-                                if(selects.size()>=maxSelected){
-                                    Toast.makeText(getContext(),"最多只能选择"+maxSelected+"个",Toast.LENGTH_SHORT).show();
+                                if (selects.size() >= maxSelected) {
+                                    Toast.makeText(getContext(), "最多只能选择" + maxSelected + "个", Toast.LENGTH_SHORT).show();
                                     return super.onSingleTapConfirmed(e);
-                                }else {
-                                    selects.add(seat);
+                                } else {
+                                    addChooseSeat(i,j);
                                     if (seatChecker != null) {
                                         seatChecker.checked(i, j);
                                     }
@@ -915,7 +1071,9 @@ public class SeatTable extends View {
                             float currentScaleY = getMatrixScaleY();
 
                             if (currentScaleY < 1.7) {
-                                postDelayed(new AnimationScaleRunnable(x, y, 1.9f), SCALE_TIME);
+                                scaleX=x;
+                                scaleY=y;
+                                zoomAnimate(currentScaleY,1.9f);
                             }
 
                             invalidate();
@@ -928,6 +1086,19 @@ public class SeatTable extends View {
             return super.onSingleTapConfirmed(e);
         }
     });
+
+    private void addChooseSeat(int row,int column){
+        int id=getID(row,column);
+        for(int i=0;i<selects.size();i++){
+            int item=selects.get(i);
+            if(id<item){
+                selects.add(i,id);
+                return;
+            }
+        }
+
+        selects.add(id);
+    }
 
     public interface SeatChecker {
         /**
