@@ -51,8 +51,7 @@ public class MainActivity extends AppCompatActivity {
 
         });
 
-        seatTableView.getSelectedSeats();
-
-        seatTableView.setData(20,15);
+        seatTableView.setData(10,15);
     }
+
 }
