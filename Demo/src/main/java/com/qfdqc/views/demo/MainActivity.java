@@ -2,8 +2,6 @@ package com.qfdqc.views.demo;
 
 import android.os.Bundle;
 import android.support.v7.app.AppCompatActivity;
-import android.util.Log;
-import android.view.View;
 
 import com.qfdqc.views.seattable.SeatTable;
 
@@ -49,9 +47,14 @@ public class MainActivity extends AppCompatActivity {
 
             }
 
-        });
+            @Override
+            public String[] checkedSeatTxt(int row, int column) {
+                return null;
+            }
 
+        });
         seatTableView.setData(10,15);
+
     }
 
 }

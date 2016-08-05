@@ -36,12 +36,21 @@ import java.util.Collections;
  * Created by baoyunlong on 16/6/16.
  */
 public class SeatTable extends View {
-    private final boolean DBG = true;
+    private final boolean DBG = false;
 
     Paint paint = new Paint();
     Paint overviewPaint=new Paint();
     Paint lineNumberPaint;
     float lineNumberTxtHeight;
+
+    /**
+     * 设置行号 默认显示 1,2,3....数字
+     * @param lineNumbers
+     */
+    public void setLineNumbers(ArrayList<String> lineNumbers) {
+        this.lineNumbers = lineNumbers;
+        invalidate();
+    }
 
     /**
      * 用来保存所有行号
@@ -274,6 +283,10 @@ public class SeatTable extends View {
 
     public SeatTable(Context context, AttributeSet attrs) {
         super(context, attrs);
+        init(context,attrs);
+    }
+
+    private void init(Context context,AttributeSet attrs){
         TypedArray typedArray = context.obtainStyledAttributes(attrs, R.styleable.SeatTableView);
         overview_checked = typedArray.getColor(R.styleable.SeatTableView_overview_checked, Color.parseColor("#5A9E64"));
         overview_sold = typedArray.getColor(R.styleable.SeatTableView_overview_sold, Color.RED);
@@ -281,11 +294,14 @@ public class SeatTable extends View {
         seatCheckedResID = typedArray.getResourceId(R.styleable.SeatTableView_seat_checked, R.drawable.seat_green);
         seatSoldResID = typedArray.getResourceId(R.styleable.SeatTableView_overview_sold, R.drawable.seat_sold);
         seatAvailableResID = typedArray.getResourceId(R.styleable.SeatTableView_seat_available, R.drawable.seat_gray);
+        typedArray.recycle();
     }
 
     public SeatTable(Context context, AttributeSet attrs, int defStyleAttr) {
         super(context, attrs, defStyleAttr);
+        init(context,attrs);
     }
+
 
     @Override
     protected void onMeasure(int widthMeasureSpec, int heightMeasureSpec) {
@@ -355,9 +371,14 @@ public class SeatTable extends View {
         lineNumberPaintFontMetrics = lineNumberPaint.getFontMetrics();
         lineNumberPaint.setTextAlign(Paint.Align.CENTER);
 
-        for (int i = 0; i < row; i++) {
-            lineNumbers.add((i + 1) + "");
+        if(lineNumbers==null){
+            lineNumbers=new ArrayList<>();
+        }else if(lineNumbers.size()<=0) {
+            for (int i = 0; i < row; i++) {
+                lineNumbers.add((i + 1) + "");
+            }
         }
+
 
         matrix.postTranslate(numberWidth + spacing, headHeight + screenHeight + borderHeight + verSpacing);
 
@@ -546,6 +567,7 @@ public class SeatTable extends View {
             if (bottom < 0 || top > getHeight()) {
                 continue;
             }
+
             for (int j = 0; j < column; j++) {
                 float left = j * seatBitmap.getWidth() * xScale1 * scaleX + j * spacing * scaleX + translateX;
 
@@ -611,10 +633,25 @@ public class SeatTable extends View {
      * @param column
      */
     private void drawText(Canvas canvas, int row, int column, float top, float left) {
-        TextPaint txtPaint = new TextPaint(Paint.ANTI_ALIAS_FLAG);
-        txtPaint.setColor(txt_color);
+
         String txt = (row + 1) + "排";
         String txt1 = (column + 1) + "座";
+
+        if(seatChecker!=null){
+            String[] strings = seatChecker.checkedSeatTxt(row, column);
+            if(strings!=null&&strings.length>0){
+                if(strings.length>=2){
+                    txt=strings[0];
+                    txt1=strings[1];
+                }else {
+                    txt=strings[0];
+                    txt1=null;
+                }
+            }
+        }
+
+        TextPaint txtPaint = new TextPaint(Paint.ANTI_ALIAS_FLAG);
+        txtPaint.setColor(txt_color);
         txtPaint.setTypeface(Typeface.DEFAULT_BOLD);
         float seatHeight = this.seatHeight * getMatrixScaleX();
         float seatWidth = this.seatWidth * getMatrixScaleX();
@@ -625,8 +662,13 @@ public class SeatTable extends View {
         float txtWidth = txtPaint.measureText(txt);
         float startX = left + seatWidth / 2 - txtWidth / 2;
 
-        canvas.drawText(txt, startX, getBaseLine(txtPaint, top, top + center), txtPaint);
-        canvas.drawText(txt1, startX, getBaseLine(txtPaint, top + center, top + center + seatHeight / 2), txtPaint);
+        //只绘制一行文字
+        if(txt1==null){
+            canvas.drawText(txt, startX, getBaseLine(txtPaint, top, top + seatHeight), txtPaint);
+        }else {
+            canvas.drawText(txt, startX, getBaseLine(txtPaint, top, top + center), txtPaint);
+            canvas.drawText(txt1, startX, getBaseLine(txtPaint, top + center, top + center + seatHeight / 2), txtPaint);
+        }
 
         if (DBG) {
             Log.d("drawTest:", "top:" + top);
@@ -799,7 +841,7 @@ public class SeatTable extends View {
         float startYPosition = screenHeight * getMatrixScaleY() + verSpacing * getMatrixScaleY() + headHeight + borderHeight;
 
         //处理上下滑动
-        if (currentSeatBitmapHeight < getHeight()) {
+        if (currentSeatBitmapHeight+headHeight < getHeight()) {
 
             if (getTranslateY() < startYPosition) {
                 moveYLength = startYPosition - getTranslateY();
@@ -821,13 +863,6 @@ public class SeatTable extends View {
             }
         }
 
-//        Message message = Message.obtain();
-//        MoveInfo moveInfo = new MoveInfo();
-//        moveInfo.moveXLength = moveXLength;
-//        moveInfo.moveYLength = moveYLength;
-//        message.obj = moveInfo;
-//        handler.sendMessageDelayed(message, time);
-
         Point start = new Point();
         start.x = (int) getTranslateX();
         start.y = (int) getTranslateY();
@@ -840,11 +875,6 @@ public class SeatTable extends View {
 
     }
 
-    class MoveInfo {
-        public float moveXLength;
-        public float moveYLength;
-    }
-
     private void autoScale() {
 
         if (getMatrixScaleX() > 2.2) {
@@ -854,42 +884,9 @@ public class SeatTable extends View {
         }
     }
 
-    int FRAME_COUNT = 10;
-    int time = 10;
-    int count;
-    int SCALE_TIME = 15;
-
-    Handler handler = new Handler(new Handler.Callback() {
-        @Override
-        public boolean handleMessage(Message msg) {
-
-            if (count < FRAME_COUNT) {
-                count++;
-                MoveInfo moveInfo = (MoveInfo) msg.obj;
-                float moveXLength = moveInfo.moveXLength;
-                float moveYLength = moveInfo.moveYLength;
-                float xValue = moveXLength / FRAME_COUNT;
-                float yValue = moveYLength / FRAME_COUNT;
-
-                matrix.postTranslate(xValue, yValue);
-                invalidate();
-                Message message = Message.obtain();
-                message.obj = msg.obj;
-                handler.sendMessageDelayed(message, time);
-                if (DBG) {
-                    Log.d("autoScroll", "moveCount:" + count);
-                }
-            } else {
-                count = 0;
-            }
-
-            return true;
-        }
-    });
-
+    Handler handler = new Handler();
 
     ArrayList<Integer> selects = new ArrayList<>();
-
 
     public ArrayList<String> getSelectedSeat(){
         ArrayList<String> results=new ArrayList<>();
@@ -1070,7 +1067,6 @@ public class SeatTable extends View {
         }
     });
 
-
     GestureDetector gestureDetector = new GestureDetector(getContext(), new GestureDetector.SimpleOnGestureListener() {
         @Override
         public boolean onSingleTapConfirmed(MotionEvent e) {
@@ -1163,6 +1159,14 @@ public class SeatTable extends View {
 
         void unCheck(int row, int column);
 
+        /**
+         * 获取选中后座位上显示的文字
+         * @param row
+         * @param column
+         * @return 返回2个元素的数组,第一个元素是第一行的文字,第二个元素是第二行文字,如果只返回一个元素则会绘制到座位图的中间位置
+         */
+        String[] checkedSeatTxt(int row,int column);
+
     }
 
     public void setScreenName(String screenName) {
@@ -1176,6 +1180,49 @@ public class SeatTable extends View {
     public void setSeatChecker(SeatChecker seatChecker) {
         this.seatChecker = seatChecker;
         invalidate();
+    }
+
+    private int getRowNumber(int row){
+        int result=row;
+        if(seatChecker==null){
+            return -1;
+        }
+
+        for(int i=0;i<row;i++){
+            for (int j=0;j<column;j++){
+                if(seatChecker.isValidSeat(i,j)){
+                    break;
+                }
+
+                if(j==column-1){
+                    if(i==row){
+                        return -1;
+                    }
+                    result--;
+                }
+            }
+        }
+        return result;
+    }
+
+    private int getColumnNumber(int row,int column){
+        int result=column;
+        if(seatChecker==null){
+            return -1;
+        }
+
+        for(int i=row;i<=row;i++){
+            for (int j=0;j<column;j++){
+
+                if(!seatChecker.isValidSeat(i,j)){
+                    if(j==column){
+                        return -1;
+                    }
+                    result--;
+                }
+            }
+        }
+        return result;
     }
 
 }
