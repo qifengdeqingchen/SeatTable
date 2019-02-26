@@ -1076,7 +1076,7 @@ public class SeatTable extends View {
 
             for (int i = 0; i < row; i++) {
                 for (int j = 0; j < column; j++) {
-                    int tempX = (int) ((j * seatWidth + j * spacing) * getMatrixScaleX() + getTranslateX());
+                    int tempX = (int) ((j * seatWidth + (j+1) * spacing) * getMatrixScaleX() + getTranslateX());
                     int maxTemX = (int) (tempX + seatWidth * getMatrixScaleX());
 
                     int tempY = (int) ((i * seatHeight + i * verSpacing) * getMatrixScaleY() + getTranslateY());
